@@ -86,7 +86,7 @@ async function uploadAndTranscode(
 
   // Poll for transcoding to complete
   info(`Waiting for transcoding...`);
-  const maxAttempts = 60; // Up to 5 minutes (5s intervals)
+  const maxAttempts = 120; // Up to 10 minutes (5s intervals)
 
   for (let i = 0; i < maxAttempts; i++) {
     const transcodeResponse = await client.getTranscodedAudio(uploadId);
@@ -103,7 +103,7 @@ async function uploadAndTranscode(
       };
     }
 
-    if (phase && phase !== "queued" && phase !== "processing" && phase !== "transcoding") {
+    if (phase === "failed" || phase === "error") {
       error(`Transcoding failed with status: ${phase}`);
       process.exit(1);
     }
