@@ -29,7 +29,7 @@ export const AuthErrorSchema = z.object({
 // ============ Content Schemas ============
 
 const DisplaySchema = z.object({
-  icon16x16: z.string().optional(),
+  icon16x16: z.string().nullable().optional(),
 }).nullable().optional();
 
 const TrackEventsSchema = z.object({
