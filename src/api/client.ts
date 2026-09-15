@@ -71,7 +71,7 @@ export class YotoClient {
       },
       body: new URLSearchParams({
         client_id: this.clientId,
-        scope: "profile offline_access openid",
+        scope: "offline_access",
         audience: "https://api.yotoplay.com",
       }),
     });
