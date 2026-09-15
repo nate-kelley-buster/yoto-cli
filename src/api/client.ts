@@ -27,6 +27,7 @@ import {
   type TranscodedAudioResponse,
   type GetDevicesResponse,
   type DeviceStatus,
+  type Card,
 } from "./schemas.ts";
 
 const AUTH_BASE_URL = "https://login.yotoplay.com";
@@ -232,6 +233,48 @@ export class YotoClient {
       method: "POST",
       body: JSON.stringify({ ...data, cardId }),
     });
+  }
+
+  // Read-modify-write against /content is not atomic: the API has no
+  // optimistic-concurrency check, and a getContent() shortly after a write
+  // can race the server's own propagation, returning stale data. A second
+  // read-modify-write built on that stale snapshot silently clobbers the
+  // first write when it POSTs the whole document back. This wraps a mutation
+  // in fetch -> mutate -> write -> re-fetch -> verify, retrying the full
+  // cycle when verification fails instead of trusting a single write.
+  async updateContentSafely(
+    cardId: string,
+    mutate: (card: Card) => void,
+    verify: (card: Card) => boolean,
+    maxAttempts = 4
+  ): Promise<GetContentResponse> {
+    let lastCard: Card | undefined;
+    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+      const existing = await this.getContent(cardId);
+      const card = existing.card;
+      mutate(card);
+
+      await this.updateContent(cardId, {
+        title: card.title,
+        content: card.content,
+        metadata: card.metadata,
+      });
+
+      const reread = await this.getContent(cardId);
+      lastCard = reread.card;
+      if (verify(reread.card)) {
+        return reread;
+      }
+
+      if (attempt < maxAttempts) {
+        await new Promise((resolve) => setTimeout(resolve, 400 * attempt));
+      }
+    }
+
+    throw new Error(
+      `Update to card ${cardId} could not be verified after ${maxAttempts} attempts ` +
+        `(a concurrent write likely clobbered it each time). Last observed state did not match the expected change.`
+    );
   }
 
   async deleteContent(cardId: string): Promise<DeleteContentResponse> {

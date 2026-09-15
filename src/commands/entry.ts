@@ -148,48 +148,53 @@ export async function addEntry(
   const iconRef = `yoto:#${mediaId}`;
 
   const client = await getAuthenticatedClient();
-  const existing = await client.getContent(cardId);
-  const card = existing.card;
 
-  // Generate a short key (API requires ≤20 chars)
-  const nextIndex = card.content.chapters.length;
-  const overlayLabel = String(nextIndex + 1); // 1-based for display
+  let nextIndex = -1;
+  await client.updateContentSafely(
+    cardId,
+    (card) => {
+      // Generate a short key (API requires ≤20 chars)
+      nextIndex = card.content.chapters.length;
+      const overlayLabel = String(nextIndex + 1); // 1-based for display
 
-  const track = {
-    key: "01",
-    title,
-    trackUrl,
-    type: "audio",
-    format: "aac",
-    duration,
-    fileSize,
-    overlayLabel,
-    display: { icon16x16: iconRef },
-    ambient: null,
-  };
+      const track = {
+        key: "01",
+        title,
+        trackUrl,
+        type: "audio",
+        format: "aac",
+        duration,
+        fileSize,
+        overlayLabel,
+        display: { icon16x16: iconRef },
+        ambient: null,
+      };
 
-  const newChapter = {
-    key: String(nextIndex).padStart(2, "0"),
-    title,
-    duration,
-    tracks: [track],
-    overlayLabel,
-    display: { icon16x16: iconRef },
-    fileSize,
-    _originalFileName: originalFileName,
-    availableFrom: null,
-    ambient: null,
-    defaultTrackDisplay: null,
-    defaultTrackAmbient: null,
-  };
+      const newChapter = {
+        key: String(nextIndex).padStart(2, "0"),
+        title,
+        duration,
+        tracks: [track],
+        overlayLabel,
+        display: { icon16x16: iconRef },
+        fileSize,
+        _originalFileName: originalFileName,
+        availableFrom: null,
+        ambient: null,
+        defaultTrackDisplay: null,
+        defaultTrackAmbient: null,
+      };
 
-  card.content.chapters.push(newChapter);
-
-  await client.updateContent(cardId, {
-    title: card.title,
-    content: card.content,
-    metadata: card.metadata,
-  });
+      card.content.chapters.push(newChapter);
+    },
+    (card) => {
+      const chapter = card.content.chapters[nextIndex];
+      return (
+        chapter?.title === title &&
+        chapter?.tracks?.[0]?.trackUrl === trackUrl
+      );
+    }
+  );
 
   if (options.json) {
     json({
@@ -214,40 +219,58 @@ export async function updateEntry(
   options: { title?: string; icon?: string }
 ): Promise<void> {
   const client = await getAuthenticatedClient();
-  const existing = await client.getContent(cardId);
-  const card = existing.card;
 
-  const chapter = card.content.chapters[entryIndex];
-  if (!chapter) {
+  // Resolve the icon (may upload a file) once, up front, so a retry below
+  // never re-uploads it.
+  const iconRef = options.icon
+    ? `yoto:#${await resolveIcon(options.icon)}`
+    : undefined;
+
+  const preCheck = await client.getContent(cardId);
+  if (!preCheck.card.content.chapters[entryIndex]) {
     error(`Entry ${entryIndex} not found. Use 0-based index.`);
     process.exit(1);
   }
 
-  // Update title on both chapter and all tracks
-  if (options.title) {
-    chapter.title = options.title;
-    for (const track of chapter.tracks) {
-      track.title = options.title;
+  let finalTitle = "";
+  await client.updateContentSafely(
+    cardId,
+    (card) => {
+      const chapter = card.content.chapters[entryIndex];
+      if (!chapter) {
+        error(`Entry ${entryIndex} not found. Use 0-based index.`);
+        process.exit(1);
+      }
+
+      if (options.title) {
+        chapter.title = options.title;
+        for (const track of chapter.tracks) {
+          track.title = options.title;
+        }
+      }
+
+      if (iconRef) {
+        chapter.display = { ...chapter.display, icon16x16: iconRef };
+        for (const track of chapter.tracks) {
+          track.display = { ...track.display, icon16x16: iconRef };
+        }
+      }
+
+      finalTitle = chapter.title;
+    },
+    (card) => {
+      const chapter = card.content.chapters[entryIndex];
+      if (!chapter) return false;
+      if (options.title && chapter.title !== options.title) return false;
+      if (iconRef && chapter.display?.icon16x16 !== iconRef) return false;
+      if (iconRef && chapter.tracks.some((t) => t.display?.icon16x16 !== iconRef)) {
+        return false;
+      }
+      return true;
     }
-  }
+  );
 
-  // Update icon on both chapter and all tracks
-  if (options.icon) {
-    const mediaId = await resolveIcon(options.icon);
-    const iconRef = `yoto:#${mediaId}`;
-    chapter.display = { ...chapter.display, icon16x16: iconRef };
-    for (const track of chapter.tracks) {
-      track.display = { ...track.display, icon16x16: iconRef };
-    }
-  }
-
-  await client.updateContent(cardId, {
-    title: card.title,
-    content: card.content,
-    metadata: card.metadata,
-  });
-
-  success(`Updated entry "${chapter.title}"`);
+  success(`Updated entry "${finalTitle}"`);
 }
 
 export async function deleteEntry(
