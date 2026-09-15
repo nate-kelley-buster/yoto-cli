@@ -31,8 +31,8 @@ export async function listPublicIcons(options: {
   }
 
   table(
-    ["Title", "ID", "Tags"],
-    icons.map((icon) => [icon.title ?? "", icon.displayIconId, icon.publicTags.join(", ")])
+    ["Title", "Media ID", "Tags"],
+    icons.map((icon) => [icon.title ?? "", icon.mediaId, icon.publicTags.join(", ")])
   );
 }
 
@@ -51,8 +51,8 @@ export async function listUserIcons(options: { json?: boolean }): Promise<void> 
   }
 
   table(
-    ["ID", "URL"],
-    response.displayIcons.map((icon) => [icon.displayIconId, icon.url])
+    ["Media ID", "URL"],
+    response.displayIcons.map((icon) => [icon.mediaId, icon.url])
   );
 }
 
@@ -75,7 +75,7 @@ export async function uploadIcon(
   }
 
   const icon = response.displayIcon;
-  success(`Uploaded icon: ${icon.displayIconId}`);
+  success(`Uploaded icon: ${icon.mediaId}`);
   if (typeof icon.url === "string" && icon.url) {
     info(`URL: ${icon.url}`);
   }
