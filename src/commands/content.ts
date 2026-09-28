@@ -191,7 +191,13 @@ export async function addTrack(
   chapterIndex: number,
   title: string,
   trackUrl: string,
-  options: { icon?: string; duration?: number }
+  options: {
+    icon?: string;
+    duration?: number;
+    format?: string;
+    channels?: string;
+    fileSize?: number;
+  }
 ): Promise<void> {
   // Resolve icon if provided
   const mediaId = options.icon ? await resolveIcon(options.icon) : undefined;
@@ -213,6 +219,9 @@ export async function addTrack(
     title,
     trackUrl,
     type: "audio",
+    format: options.format,
+    channels: options.channels,
+    fileSize: options.fileSize,
     duration: options.duration,
     icon: mediaId,
     display: mediaId ? { icon16x16: `yoto:#${mediaId}` } : undefined,
@@ -260,6 +269,7 @@ export async function addTrackSmart(
 ): Promise<void> {
   let trackUrl = source;
   let duration = options.duration;
+  let transcoded: Pick<UploadResult, "format" | "channels" | "fileSize"> = {};
 
   if (isFilePath(source)) {
     // Upload and transcode the file first
@@ -271,6 +281,7 @@ export async function addTrackSmart(
     }
     trackUrl = result.trackUrl;
     duration = duration ?? result.duration;
+    transcoded = result;
   } else if (isYotoHash(source)) {
     // Already a yoto:# hash, use directly
     trackUrl = source;
@@ -287,12 +298,16 @@ export async function addTrackSmart(
     }
     trackUrl = result.trackUrl;
     duration = duration ?? result.duration;
+    transcoded = result;
   }
 
   // Now add the track with the resolved URL
   await addTrack(cardId, chapterIndex, title, trackUrl, {
     icon: options.icon,
     duration,
+    format: transcoded.format,
+    channels: transcoded.channels,
+    fileSize: transcoded.fileSize,
   });
 }
 
@@ -464,6 +479,9 @@ interface UploadResult {
   trackUrl?: string;
   sha256?: string;
   duration?: number;
+  format?: string;
+  channels?: string;
+  fileSize?: number;
 }
 
 async function uploadAndTranscode(
@@ -512,6 +530,9 @@ async function uploadAndTranscode(
         trackUrl: `yoto:#${transcode.transcodedSha256}`,
         sha256: transcode.transcodedSha256,
         duration: transcode.transcodedInfo?.duration,
+        format: transcode.transcodedInfo?.format,
+        channels: transcode.transcodedInfo?.channels,
+        fileSize: transcode.transcodedInfo?.fileSize,
       };
     }
 

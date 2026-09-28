@@ -52,6 +52,9 @@ interface UploadResult {
   trackUrl?: string;
   sha256?: string;
   duration?: number;
+  format?: string;
+  channels?: string;
+  fileSize?: number;
 }
 
 async function uploadAndTranscode(
@@ -100,6 +103,9 @@ async function uploadAndTranscode(
         trackUrl: `yoto:#${transcode.transcodedSha256}`,
         sha256: transcode.transcodedSha256,
         duration: transcode.transcodedInfo?.duration,
+        format: transcode.transcodedInfo?.format,
+        channels: transcode.transcodedInfo?.channels,
+        fileSize: transcode.transcodedInfo?.fileSize,
       };
     }
 
@@ -129,9 +135,6 @@ export async function addEntry(
     process.exit(1);
   }
 
-  // Get file size before upload
-  const fileStat = await stat(options.file);
-  const fileSize = fileStat.size;
   const originalFileName = basename(options.file).replace(/\.[^/.]+$/, ""); // Remove extension
 
   const result = await uploadAndTranscode(options.file, { wait: true });
@@ -139,8 +142,7 @@ export async function addEntry(
     error(`Failed to get track URL from upload`);
     process.exit(1);
   }
-  const trackUrl = result.trackUrl;
-  const duration = result.duration;
+  const { trackUrl, duration, format, channels, fileSize } = result;
 
   // Resolve icon (upload if file path, use directly if hash)
   const DEFAULT_ICON = "aUm9i3ex3qqAMYBv-i-O-pYMKuMJGICtR3Vhf289u2Q";
@@ -162,7 +164,8 @@ export async function addEntry(
         title,
         trackUrl,
         type: "audio",
-        format: "aac",
+        format,
+        channels,
         duration,
         fileSize,
         overlayLabel,

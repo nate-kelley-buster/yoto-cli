@@ -187,6 +187,7 @@ export const TranscodedAudioResponseSchema = z.object({
       codec: z.string().optional(),
       format: z.string().optional(),
       channels: z.string().optional(),
+      fileSize: z.number().optional(),
       metadata: z.object({
         title: z.string().optional(),
         artist: z.string().optional(),
