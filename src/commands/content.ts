@@ -90,6 +90,8 @@ export async function getPlaylist(
   if (card.metadata?.author) console.log(`Author: ${card.metadata.author}`);
   if (card.metadata?.description)
     console.log(`Description: ${card.metadata.description}`);
+  if (card.metadata?.cover?.imageL)
+    console.log(`Cover: ${card.metadata.cover.imageL}`);
   console.log(`\nChapters (${card.content.chapters.length}):`);
 
   card.content.chapters.forEach((chapter, i) => {
@@ -360,6 +362,7 @@ export async function updatePlaylist(
     description?: string;
     author?: string;
     playbackType?: string;
+    cover?: string;
   }
 ): Promise<void> {
   const client = await getAuthenticatedClient();
@@ -376,6 +379,30 @@ export async function updatePlaylist(
   }
   if (options.playbackType !== undefined) {
     card.content.playbackType = options.playbackType;
+  }
+  if (options.cover !== undefined) {
+    if (options.cover.startsWith("http://") || options.cover.startsWith("https://")) {
+      card.metadata = {
+        ...card.metadata,
+        cover: { imageL: options.cover },
+      };
+    } else {
+      info(`Uploading cover image...`);
+      try {
+        await stat(options.cover);
+      } catch {
+        error(`Cover file not found: ${options.cover}`);
+        process.exit(1);
+      }
+      const file = await readFile(options.cover);
+      const filename = basename(options.cover);
+      const uploadRes = await client.uploadCoverImage(file, { filename });
+      card.metadata = {
+        ...card.metadata,
+        cover: { imageL: uploadRes.coverImage.mediaUrl },
+      };
+      success(`Cover uploaded`);
+    }
   }
 
   await client.updateContent(cardId, {

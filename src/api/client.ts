@@ -9,6 +9,7 @@ import {
   GetPublicIconsResponseSchema,
   GetUserIconsResponseSchema,
   UploadIconResponseSchema,
+  UploadCoverResponseSchema,
   UploadUrlResponseSchema,
   TranscodedAudioResponseSchema,
   GetDevicesResponseSchema,
@@ -23,6 +24,7 @@ import {
   type GetPublicIconsResponse,
   type GetUserIconsResponse,
   type UploadIconResponse,
+  type UploadCoverResponse,
   type UploadUrlResponse,
   type TranscodedAudioResponse,
   type GetDevicesResponse,
@@ -344,6 +346,54 @@ export class YotoClient {
 
     const data: unknown = await response.json();
     return UploadIconResponseSchema.parse(data);
+  }
+
+  async uploadCoverImage(
+    file: Buffer | Uint8Array,
+    options?: { filename?: string; autoConvert?: boolean }
+  ): Promise<UploadCoverResponse> {
+    if (!this.accessToken) {
+      throw new Error("Not authenticated. Please login first.");
+    }
+
+    const params = new URLSearchParams();
+    if (options?.autoConvert !== undefined) {
+      params.set("autoConvert", String(options.autoConvert));
+    } else {
+      params.set("autoConvert", "true");
+    }
+    if (options?.filename) {
+      params.set("filename", options.filename);
+    }
+    const query = params.toString() ? `?${params}` : "";
+
+    const filename = options?.filename || "cover.jpg";
+    const mimeType = filename.endsWith(".png") ? "image/png"
+      : filename.endsWith(".gif") ? "image/gif"
+      : "image/jpeg";
+
+    const response = await fetch(
+      `${API_BASE_URL}/media/coverImage/user/me/upload${query}`,
+      {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${this.accessToken}`,
+          "Content-Type": mimeType,
+        },
+        body: file,
+      }
+    );
+
+    if (!response.ok) {
+      const data: unknown = await response.json().catch(() => ({}));
+      const apiError = data as { error?: { message?: string } } | null;
+      throw new Error(
+        apiError?.error?.message || `Cover upload failed: ${response.status}`
+      );
+    }
+
+    const data: unknown = await response.json();
+    return UploadCoverResponseSchema.parse(data);
   }
 
   // ============ Media Upload ============

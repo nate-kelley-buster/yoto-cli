@@ -77,6 +77,7 @@ Examples:
     .option("--description <desc>", "Update playlist description")
     .option("--author <author>", "Update playlist author")
     .option("--playback-type <type>", "Update playback type (e.g., linear)")
+    .option("--cover <path>", "Update playlist cover image (file path or URL)")
     .addHelpText(
       "after",
       `
@@ -87,6 +88,7 @@ Examples:
   $ yoto playlist update 5ukMR --title "New Title"
   $ yoto playlist update 5ukMR --description "Updated description"
   $ yoto playlist update 5ukMR --title "Stories" --author "Dad"
+  $ yoto playlist update 5ukMR --cover ./cover.jpg
 `
     )
     .action((cardId, options) =>
@@ -95,6 +97,7 @@ Examples:
         description: options.description,
         author: options.author,
         playbackType: options.playbackType,
+        cover: options.cover,
       })
     );
 

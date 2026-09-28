@@ -74,11 +74,17 @@ export const ContentConfigSchema = z.object({
   resumeTimeout: z.number().optional(),
 });
 
+export const CoverSchema = z.object({
+  imageL: z.string().optional(),
+  imageS: z.string().optional(),
+}).passthrough();
+
 export const ContentMetadataSchema = z.object({
   author: z.string().optional(),
   category: z.string().optional(),
   description: z.string().optional(),
-});
+  cover: CoverSchema.optional(),
+}).passthrough();
 
 export const ContentSchema = z.object({
   chapters: z.array(ChapterSchema),
@@ -101,12 +107,12 @@ export const CardSchema = z.object({
   userId: z.string().optional(),
   availability: z.string().optional(),
   deleted: z.boolean().optional(),
-});
+}).passthrough();
 
 // For list responses, content may not include chapters
 export const CardSummarySchema = CardSchema.extend({
   content: ContentSchema.partial(),
-});
+}).passthrough();
 
 export const GetContentResponseSchema = z.object({
   card: CardSchema,
@@ -161,6 +167,13 @@ export const UploadIconResponseSchema = z.object({
     new: z.boolean().optional(),
     url: z.union([z.string(), z.object({})]), // empty object if duplicate
     userId: z.string(),
+  }),
+});
+
+export const UploadCoverResponseSchema = z.object({
+  coverImage: z.object({
+    mediaId: z.string().optional(),
+    mediaUrl: z.string(),
   }),
 });
 
@@ -236,6 +249,7 @@ export type AuthError = z.infer<typeof AuthErrorSchema>;
 export type Track = z.infer<typeof TrackSchema>;
 export type Chapter = z.infer<typeof ChapterSchema>;
 export type ContentConfig = z.infer<typeof ContentConfigSchema>;
+export type Cover = z.infer<typeof CoverSchema>;
 export type ContentMetadata = z.infer<typeof ContentMetadataSchema>;
 export type Content = z.infer<typeof ContentSchema>;
 export type Card = z.infer<typeof CardSchema>;
@@ -248,6 +262,7 @@ export type UserIcon = z.infer<typeof UserIconSchema>;
 export type GetPublicIconsResponse = z.infer<typeof GetPublicIconsResponseSchema>;
 export type GetUserIconsResponse = z.infer<typeof GetUserIconsResponseSchema>;
 export type UploadIconResponse = z.infer<typeof UploadIconResponseSchema>;
+export type UploadCoverResponse = z.infer<typeof UploadCoverResponseSchema>;
 export type UploadUrlResponse = z.infer<typeof UploadUrlResponseSchema>;
 export type TranscodedAudioResponse = z.infer<typeof TranscodedAudioResponseSchema>;
 export type Device = z.infer<typeof DeviceSchema>;
