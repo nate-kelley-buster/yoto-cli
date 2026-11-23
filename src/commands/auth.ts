@@ -1,9 +1,12 @@
-import { YotoClient } from "../api/client.ts";
+import { randomUUID } from "crypto";
+import { YotoClient, requestTokenRefresh } from "../api/client.ts";
 import {
   loadConfig,
   saveConfig,
   clearConfig,
   getConfigPath,
+  refreshSavedCredentials,
+  type Config,
 } from "../utils/config.ts";
 import { success, error, info } from "../utils/output.ts";
 
@@ -38,6 +41,7 @@ export async function login(): Promise<void> {
         clientId: CLIENT_ID,
         accessToken: tokens.access_token,
         refreshToken: tokens.refresh_token,
+        sessionId: randomUUID(),
       });
 
       success("Successfully logged in!");
@@ -70,18 +74,8 @@ export async function status(): Promise<void> {
     return;
   }
 
-  const client = new YotoClient({
-    clientId: config.clientId,
-    accessToken: config.accessToken,
-    refreshToken: config.refreshToken,
-  });
-
-  try {
-    await client.listContent();
-    success("Logged in and token is valid.");
-  } catch {
-    error("Token may be expired. Try 'yoto login' to re-authenticate.");
-  }
+  await clientFromConfig(config).listContent();
+  success("Logged in and token is valid.");
 }
 
 export async function getAuthenticatedClient(): Promise<YotoClient> {
@@ -92,9 +86,13 @@ export async function getAuthenticatedClient(): Promise<YotoClient> {
     process.exit(1);
   }
 
-  return new YotoClient({
-    clientId: config.clientId,
-    accessToken: config.accessToken,
-    refreshToken: config.refreshToken,
-  });
+  return clientFromConfig(config);
+}
+
+function clientFromConfig(config: Config): YotoClient {
+  return new YotoClient(config, (previous) =>
+    refreshSavedCredentials(config, previous, () =>
+      requestTokenRefresh(config.clientId, previous.refreshToken)
+    )
+  );
 }

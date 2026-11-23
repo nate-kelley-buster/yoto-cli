@@ -34,6 +34,62 @@ import {
 
 const AUTH_BASE_URL = "https://login.yotoplay.com";
 const API_BASE_URL = "https://api.yotoplay.com";
+const EXPIRY_BUFFER_MS = 30_000;
+
+export interface Credentials {
+  accessToken: string;
+  refreshToken: string;
+}
+
+const RefreshedTokensSchema = z.object({
+  access_token: z.string().min(1),
+  refresh_token: z.string().min(1),
+});
+
+export async function requestTokenRefresh(
+  clientId: string,
+  refreshToken: string
+): Promise<Credentials> {
+  const response = await fetch(`${AUTH_BASE_URL}/oauth/token`, {
+    method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body: new URLSearchParams({
+      client_id: clientId,
+      grant_type: "refresh_token",
+      refresh_token: refreshToken,
+    }),
+  }).catch(() => {
+    throw new Error("Could not reach Yoto to refresh login credentials.");
+  });
+
+  if (!response.ok) {
+    throw new Error(`Yoto token refresh failed (HTTP ${response.status}).`);
+  }
+
+  const tokens = RefreshedTokensSchema.safeParse(await response.json().catch(() => null));
+  if (!tokens.success) {
+    throw new Error("Yoto returned an invalid token refresh response.");
+  }
+  return {
+    accessToken: tokens.data.access_token,
+    refreshToken: tokens.data.refresh_token,
+  };
+}
+
+function isExpiring(token: string): boolean {
+  if (!/^[\w-]+\.[\w-]+\.[\w-]+$/.test(token)) return false;
+  const [header, payload] = token.split(".");
+  if (!header || !payload) return false;
+
+  try {
+    const { alg } = JSON.parse(Buffer.from(header, "base64url").toString("utf8"));
+    const { exp } = JSON.parse(Buffer.from(payload, "base64url").toString("utf8"));
+    return typeof alg === "string" && typeof exp === "number" && Number.isFinite(exp) &&
+      exp * 1000 <= Date.now() + EXPIRY_BUFFER_MS;
+  } catch {
+    return false;
+  }
+}
 
 export interface YotoClientConfig {
   clientId: string;
@@ -45,8 +101,13 @@ export class YotoClient {
   private clientId: string;
   private accessToken?: string;
   private refreshToken?: string;
+  private refreshInProgress?: Promise<void>;
 
-  constructor(config: YotoClientConfig) {
+  constructor(
+    config: YotoClientConfig,
+    private readonly refreshTokens: (previous: Credentials) => Promise<Credentials> =
+      ({ refreshToken }) => requestTokenRefresh(config.clientId, refreshToken)
+  ) {
     this.clientId = config.clientId;
     this.accessToken = config.accessToken;
     this.refreshToken = config.refreshToken;
@@ -118,66 +179,61 @@ export class YotoClient {
     return tokens;
   }
 
-  async refreshAccessToken(): Promise<TokenResponse> {
-    if (!this.refreshToken) {
-      throw new Error("No refresh token available");
-    }
+  private async refreshAccessToken(accessToken: string): Promise<void> {
+    if (!this.refreshToken || accessToken !== this.accessToken) return;
 
-    const response = await fetch(`${AUTH_BASE_URL}/oauth/token`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/x-www-form-urlencoded",
-      },
-      body: new URLSearchParams({
-        client_id: this.clientId,
-        grant_type: "refresh_token",
-        refresh_token: this.refreshToken,
-      }),
-    });
-
-    const data = await response.json();
-
-    if (!response.ok) {
-      const error = AuthErrorSchema.safeParse(data);
-      throw new Error(
-        error.success
-          ? error.data.error_description || error.data.error
-          : "Failed to refresh token"
-      );
-    }
-
-    const tokens = TokenResponseSchema.parse(data);
-    this.setTokens(tokens.access_token, tokens.refresh_token);
-    return tokens;
+    this.refreshInProgress ??= this.refreshTokens({ accessToken, refreshToken: this.refreshToken })
+      .then((tokens) => this.setTokens(tokens.accessToken, tokens.refreshToken))
+      .finally(() => {
+        this.refreshInProgress = undefined;
+      });
+    await this.refreshInProgress;
   }
 
   // ============ API Request Helper ============
+
+  private async fetchAuthenticated(path: string, options: RequestInit): Promise<Response> {
+    if (!this.accessToken) {
+      throw new Error("Not authenticated. Please login first.");
+    }
+
+    const refreshedBeforeRequest = !!this.refreshToken && isExpiring(this.accessToken);
+    if (refreshedBeforeRequest) {
+      await this.refreshAccessToken(this.accessToken);
+    }
+
+    const send = (accessToken: string) => fetch(`${API_BASE_URL}${path}`, {
+      ...options,
+      headers: {
+        ...options.headers,
+        Authorization: `Bearer ${accessToken}`,
+      },
+    });
+
+    const attemptedToken = this.accessToken;
+    let response = await send(attemptedToken);
+    if (response.status === 401 && this.refreshToken && !refreshedBeforeRequest) {
+      await this.refreshAccessToken(attemptedToken);
+      response = await send(this.accessToken);
+    }
+    if (response.status === 401) {
+      throw new Error("Authentication expired. Please login again.");
+    }
+    if (response.status === 403) {
+      throw new Error("API request failed: 403 (Forbidden)");
+    }
+    return response;
+  }
 
   private async apiRequest<T>(
     path: string,
     schema: z.ZodType<T>,
     options: RequestInit = {}
   ): Promise<T> {
-    if (!this.accessToken) {
-      throw new Error("Not authenticated. Please login first.");
-    }
-
-    const response = await fetch(`${API_BASE_URL}${path}`, {
+    const response = await this.fetchAuthenticated(path, {
       ...options,
-      headers: {
-        Authorization: `Bearer ${this.accessToken}`,
-        "Content-Type": "application/json",
-        ...options.headers,
-      },
+      headers: { "Content-Type": "application/json", ...options.headers },
     });
-
-    if (response.status === 401) {
-      if (this.refreshToken) {
-        await this.refreshAccessToken();
-        return this.apiRequest(path, schema, options);
-      }
-      throw new Error("Authentication expired. Please login again.");
-    }
 
     const data: unknown = await response.json();
 
@@ -306,10 +362,6 @@ export class YotoClient {
     file: Buffer | Uint8Array,
     options?: { filename?: string; autoConvert?: boolean }
   ): Promise<UploadIconResponse> {
-    if (!this.accessToken) {
-      throw new Error("Not authenticated. Please login first.");
-    }
-
     const params = new URLSearchParams();
     if (options?.autoConvert !== undefined) {
       params.set("autoConvert", String(options.autoConvert));
@@ -324,14 +376,11 @@ export class YotoClient {
       : filename.endsWith(".gif") ? "image/gif"
       : "image/jpeg";
 
-    const response = await fetch(
-      `${API_BASE_URL}/media/displayIcons/user/me/upload${query}`,
+    const response = await this.fetchAuthenticated(
+      `/media/displayIcons/user/me/upload${query}`,
       {
         method: "POST",
-        headers: {
-          Authorization: `Bearer ${this.accessToken}`,
-          "Content-Type": mimeType,
-        },
+        headers: { "Content-Type": mimeType },
         body: file,
       }
     );
@@ -352,10 +401,6 @@ export class YotoClient {
     file: Buffer | Uint8Array,
     options?: { filename?: string; autoConvert?: boolean }
   ): Promise<UploadCoverResponse> {
-    if (!this.accessToken) {
-      throw new Error("Not authenticated. Please login first.");
-    }
-
     const params = new URLSearchParams();
     if (options?.autoConvert !== undefined) {
       params.set("autoConvert", String(options.autoConvert));
@@ -372,14 +417,11 @@ export class YotoClient {
       : filename.endsWith(".gif") ? "image/gif"
       : "image/jpeg";
 
-    const response = await fetch(
-      `${API_BASE_URL}/media/coverImage/user/me/upload${query}`,
+    const response = await this.fetchAuthenticated(
+      `/media/coverImage/user/me/upload${query}`,
       {
         method: "POST",
-        headers: {
-          Authorization: `Bearer ${this.accessToken}`,
-          "Content-Type": mimeType,
-        },
+        headers: { "Content-Type": mimeType },
         body: file,
       }
     );
